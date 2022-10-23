@@ -9,6 +9,8 @@ from html.parser import HTMLParser
 from pathlib import Path
 from xml.etree import ElementTree
 
+from datetime import datetime
+
 import click
 import flask
 import msal
@@ -233,7 +235,7 @@ def download_page(graph_client, page_url, path, page_title, indent=0):
         content = response.text
         indent_print(indent, f'Got content of length {len(content)}')
         content = re.sub(r'(?: {2})', '&nbsp;&nbsp;', content)
-        content = re.sub(r'<div .*?>', '<div style="margin:20px;max-width:528px">', content)
+        content = re.sub(r'<div .*?>', '<div style="margin:20px;max-width:624px">', content)
         content = re.sub(r'<body .*?>', '<body style="font-family:Calibri;font-size:14pt;background:#1a1a1a;color:#ddd">', content)
         content = re.sub(r'<p .*?style="margin-top:0pt;margin-bottom:0pt">', '<p>', content)
         content = re.sub(r'<a ', '<a style="color:#abffb4" ', content)
@@ -254,6 +256,22 @@ def download_page(graph_client, page_url, path, page_title, indent=0):
         content = content.replace('color:#dbe5f1', f'color:#313131')
         content = content.replace('color:silver', f'color:#313131')
         content = content.replace('color:#d99694', f'color:#404040')
+        content = content.replace('color:#1e4e79', f'color:#37a1ff')
+        content = content.replace('color:#292929', f'color:#868686')
+        content = content.replace('color:#212529', f'color:#737373')
+        content = content.replace('color:#242729', f'color:#737373')
+        content = content.replace('</head>', '\t<style>body>div p {margin-top:0pt;margin-bottom:0pt}</style>\n\t</head>')
+        content = content.replace('<td style="border:1px solid">', f'<td style="border:1px solid #686868;padding:5px;">')
+        content = re.sub(r'<td style="background-color:#eee(.*?)border:1px solid">', r'<td style="background-color:#262626\1border:1px solid #3e3e3e;padding:5px;">', content)
+        dateRegex = re.compile(r'\d{4}-\d{2}-\d{2}')
+        if dateRegex.search(content):
+            ddate = dateRegex.search(content)
+            date_object = datetime.strptime(ddate.group(0), '%Y-%m-%d').date()
+            content = re.sub(r'(<div .*?>)', r'\1\n\t\t<time style="color:#595959;text-align:right;display:block;font-style:italic;margin-bottom:40px">%s</time>\n'%date_object, content)
+        titleRegex = re.compile(r'<title>(.*?)</title>')
+        ttitle = titleRegex.search(content)
+        title_object = ttitle.group(1)
+        content = re.sub(r'(<div .*?>)', r'\1\n\t\t<h1 style="margin-bottom: 0pt;font-weight: normal;border-bottom: 1px solid #777;">%s</h1>\n'%title_object, content)
         content = download_attachments(graph_client, content, path, page_title, indent=indent)
         with open(out_html, "w", encoding='utf-8') as f:
             f.write(content)
