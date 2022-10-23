@@ -71,8 +71,8 @@ def get(graph_client, url, params=None, indent=0):
         if resp.status_code == 429:
             # We are being throttled due to too many requests.
             # See https://docs.microsoft.com/en-us/graph/throttling
-            indent_print(indent, 'Too many requests, waiting 20s and trying again.')
-            time.sleep(20)
+            indent_print(indent, 'Too many requests, waiting 300s and trying again.')
+            time.sleep(300)
         elif resp.status_code == 500:
             # In my case, one specific note page consistently gave this status
             # code when trying to get the content. The error was "19999:
@@ -89,9 +89,7 @@ def get(graph_client, url, params=None, indent=0):
 
 
 def download_attachments(graph_client, content, out_dir, page_title, indent=0):
-    dir_name = page_title + '.files'
-    #image_dir = out_dir / page_title
-    #attachment_dir = out_dir / page_title
+    dir_name = page_title + '.FILES'
     image_dir = out_dir / dir_name
     attachment_dir = out_dir / dir_name
 
@@ -149,6 +147,7 @@ def download_attachments(graph_client, content, out_dir, page_title, indent=0):
 
     content = re.sub(r"<img .*?\/>", download_image, content, flags=re.DOTALL)
     content = re.sub(r"<object .*?\/>", download_attachment, content, flags=re.DOTALL)
+    content = re.sub(r'<object (.+?)\/>', r'<object \1></object>', content)
     return content
 
 
@@ -176,8 +175,8 @@ def download_notebooks(graph_client, path, select=None, indent=0):
         sections = get_json(graph_client, nb['sectionsUrl'])
         section_groups = get_json(graph_client, nb['sectionGroupsUrl'])
         indent_print(indent + 1, f'Got {len(sections)} sections and {len(section_groups)} section groups.')
-        download_sections(graph_client, sections, path / (nb_name + '.NOTES'), select, indent=indent + 1)
-        download_section_groups(graph_client, section_groups, path / (nb_name + '.NOTES'), select, indent=indent + 1)
+        download_sections(graph_client, sections, path / (nb_name + '.SECTIONS'), select, indent=indent + 1)
+        download_section_groups(graph_client, section_groups, path / (nb_name + '.SECTIONS'), select, indent=indent + 1)
 
 
 def download_section_groups(graph_client, section_groups, path, select=None, indent=0):
@@ -187,7 +186,7 @@ def download_section_groups(graph_client, section_groups, path, select=None, ind
         indent_print(indent, f'Opening section group {sg_name}')
         sections = get_json(graph_client, sg['sectionsUrl'])
         indent_print(indent + 1, f'Got {len(sections)} sections.')
-        download_sections(graph_client, sections, path / (sg_name + '.NOTES'), select, indent=indent + 1)
+        download_sections(graph_client, sections, path / (sg_name + '.SECTIONS'), select, indent=indent + 1)
 
 
 def download_sections(graph_client, sections, path, select=None, indent=0):
@@ -233,6 +232,28 @@ def download_page(graph_client, page_url, path, page_title, indent=0):
     if response is not None:
         content = response.text
         indent_print(indent, f'Got content of length {len(content)}')
+        content = re.sub(r'(?: {2})', '&nbsp;&nbsp;', content)
+        content = re.sub(r'<div .*?>', '<div style="margin:20px;max-width:528px">', content)
+        content = re.sub(r'<body .*?>', '<body style="font-family:Calibri;font-size:14pt;background:#1a1a1a;color:#ddd">', content)
+        content = re.sub(r'<p .*?style="margin-top:0pt;margin-bottom:0pt">', '<p>', content)
+        content = re.sub(r'<a ', '<a style="color:#abffb4" ', content)
+        content = re.sub(r'<iframe (.+?)\/>', r'<iframe \1></iframe>', content)
+        content = content.replace('￼', f'<span><span>&nbsp;</span><br /></span>')
+        content = content.replace(' style="color:#333333"', f'')
+        content = content.replace('color:#330099', f'color:#c5a6ff')
+        content = content.replace('color:#8e0012', f'color:#ff8f9d')
+        content = content.replace('color:#cc3300', f'color:#ffa080')
+        content = content.replace('color:black', f'color:#eee')
+        content = content.replace('color:#333333', f'color:#ff8860')
+        content = content.replace('color:#000088', f'color:#99f')
+        content = content.replace('color:#006699', f'color:#39bdff')
+        content = content.replace('color:#35586c', f'color:#77ceff')
+        content = content.replace('color:#555555', f'color:#b9b9b9')
+        content = content.replace('color:#336666', f'color:#7bffff')
+        content = content.replace('color:#aa0000', f'color:#99f')
+        content = content.replace('color:#dbe5f1', f'color:#313131')
+        content = content.replace('color:silver', f'color:#313131')
+        content = content.replace('color:#d99694', f'color:#404040')
         content = download_attachments(graph_client, content, path, page_title, indent=indent)
         with open(out_html, "w", encoding='utf-8') as f:
             f.write(content)
