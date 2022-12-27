@@ -16,6 +16,7 @@ import flask
 import msal
 import yaml
 from pathvalidate import sanitize_filename
+from pathvalidate import sanitize_filepath
 from requests_oauthlib import OAuth2Session
 
 graph_url = 'https://graph.microsoft.com/v1.0'
@@ -210,9 +211,9 @@ def download_pages(graph_client, pages, path, select=None, indent=0):
     level_dirs[2] = ''
     for order, page in pages:
         level = page['level']
-        page_title = sanitize_filename(f'{page["title"]}', platform='auto')
+        page_title = sanitize_filename(f'{page["title"]}')
+        page_title = sanitize_filepath(f'{page_title}')
         indent_print(indent, f'Opening page {page_title}')
-        indent_print(indent, f'Level {level}')
         if level == 0:
             page_dir = level_dirs[0]
             level_dirs[1] = page_title + '.NOTES'
@@ -237,9 +238,12 @@ def download_page(graph_client, page_url, path, page_title, indent=0):
         content = re.sub(r'(?: {2})', '&nbsp;&nbsp;', content)
         content = re.sub(r'<div .*?>', '<div style="margin:20px;max-width:624px">', content)
         content = re.sub(r'<body .*?>', '<body style="font-family:Calibri;font-size:14pt;background:#1a1a1a;color:#ddd">', content)
-        content = re.sub(r'<p .*?style="margin-top:0pt;margin-bottom:0pt">', '<p>', content)
+        content = re.sub(r'<p .*?>', '<p>', content)
         content = re.sub(r'<a ', '<a style="color:#abffb4" ', content)
         content = re.sub(r'<iframe (.+?)\/>', r'<iframe \1></iframe>', content)
+        content = re.sub(r'<table (.*?)border:1px solid;(.*?)>', r'<table \1\2>', content)
+        content = re.sub(r'background-color:[^\"|^;]+[;]*', r'',content)
+        #content = re.sub(r'border:1px solid;|border:1px solid\"', r'border:1px solid #3e3e3e;padding:5px',content)
         content = content.replace('￼', f'<span><span>&nbsp;</span><br /></span>')
         content = content.replace(' style="color:#333333"', f'')
         content = content.replace('color:#330099', f'color:#c5a6ff')
@@ -257,21 +261,26 @@ def download_page(graph_client, page_url, path, page_title, indent=0):
         content = content.replace('color:silver', f'color:#313131')
         content = content.replace('color:#d99694', f'color:#404040')
         content = content.replace('color:#1e4e79', f'color:#37a1ff')
-        content = content.replace('color:#292929', f'color:#868686')
-        content = content.replace('color:#212529', f'color:#737373')
-        content = content.replace('color:#242729', f'color:#737373')
-        content = content.replace('</head>', '\t<style>body>div p {margin-top:0pt;margin-bottom:0pt}</style>\n\t</head>')
+        #content = content.replace('color:#292929', f'color:#868686')
+        #content = content.replace('color:#212529', f'color:#737373')
+        #content = content.replace('color:#242729', f'color:#737373')
+        #content = content.replace('color:#24292e', f'color:#737373')
+        content = content.replace('color:#0b0080', f'color:#bfb9ff')
+        content = content.replace('</head>', '\t<style>\n\t\t\thtml{width:100%}\n\t\t\tbody>div p {margin-top:0pt;margin-bottom:0pt}\n\t\t\timg{display:block}\n\t\t</style>\n\t</head>')
         content = content.replace('<td style="border:1px solid">', f'<td style="border:1px solid #686868;padding:5px;">')
-        content = re.sub(r'<td style="background-color:#eee(.*?)border:1px solid">', r'<td style="background-color:#262626\1border:1px solid #3e3e3e;padding:5px;">', content)
+        hexList = re.findall(r'color:\#[0-9a-f]{6}', content)
+        for item in hexList:
+            content = re.sub(f"{item}", item.replace('2','c'), content)
+        content = re.sub(r'<td style="(.*?)border:1px solid(.*?)">', r'<td style="\1border:1px solid #3e3e3e;padding:5px\2">', content)
         dateRegex = re.compile(r'\d{4}-\d{2}-\d{2}')
         if dateRegex.search(content):
             ddate = dateRegex.search(content)
             date_object = datetime.strptime(ddate.group(0), '%Y-%m-%d').date()
-            content = re.sub(r'(<div .*?>)', r'\1\n\t\t<time style="color:#595959;text-align:right;display:block;font-style:italic;margin-bottom:40px">%s</time>\n'%date_object, content)
+            content = re.sub(r'(<div style="margin:20px;max-width:624px.*?>)', r'\1\n\t\t<time style="color:#595959;text-align:right;display:block;font-style:italic;margin-bottom:40px">%s</time>\n'%date_object, content)
         titleRegex = re.compile(r'<title>(.*?)</title>')
         ttitle = titleRegex.search(content)
         title_object = ttitle.group(1)
-        content = re.sub(r'(<div .*?>)', r'\1\n\t\t<h1 style="margin-bottom: 0pt;font-weight: normal;border-bottom: 1px solid #777;">%s</h1>\n'%title_object, content)
+        content = re.sub(r'(<div style="margin:20px;max-width:624px.*?>)', r'\1\n\t\t<h1 style="margin-bottom: 0pt;font-weight: normal;border-bottom: 1px solid #777;">%s</h1>\n'%title_object, content)
         content = download_attachments(graph_client, content, path, page_title, indent=indent)
         with open(out_html, "w", encoding='utf-8') as f:
             f.write(content)
