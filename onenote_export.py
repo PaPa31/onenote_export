@@ -8,6 +8,7 @@ from fnmatch import fnmatch
 from html.parser import HTMLParser
 from pathlib import Path
 from xml.etree import ElementTree
+import subprocess
 
 from datetime import datetime
 
@@ -93,7 +94,6 @@ def get(graph_client, url, params=None, indent=0):
 
 def download_attachments(graph_client, content, out_dir, page_title, indent=0):
     dir_name = page_title + '.FILES'
-    image_dir = out_dir / dir_name
     attachment_dir = out_dir / dir_name
 
     class MyHTMLParser(HTMLParser):
@@ -112,15 +112,18 @@ def download_attachments(graph_client, content, out_dir, page_title, indent=0):
         props = parser.attrs
         image_url = props.get('data-fullres-src', props['src'])
         image_type = props.get('data-fullres-src-type', props['data-src-type']).split("/")[-1]
-        file_name = ''.join(random.choice(string.ascii_lowercase) for _ in range(10)) + '.' + image_type
-        req = get(graph_client, image_url, indent=indent)
-        if req is None:
-            return tag_match[0]
-        img = req.content
-        indent_print(indent, f'Downloaded image of {len(img)} bytes.')
-        image_dir.mkdir(exist_ok=True)
-        with open(image_dir / file_name, "wb") as f:
-            f.write(img)
+        file_name = re.sub(r'.*\-(.+)?\!1-(.+?)\/\$value', r'\1', image_url) + '.' + image_type
+        if (attachment_dir / file_name).exists():
+            indent_print(indent, f'Image {file_name} already downloaded; skipping.')
+        else:
+            req = get(graph_client, image_url, indent=indent)
+            if req is None:
+                return tag_match[0]
+            img = req.content
+            indent_print(indent, f'Downloaded image of {len(img)} bytes.')
+            attachment_dir.mkdir(exist_ok=True)
+            with open(attachment_dir / file_name, "wb") as f:
+                f.write(img)
         props['src'] = dir_name + "/" + file_name
         props = {k: v for k, v in props.items() if 'data-fullres-src' not in k}
         return generate_html('img', props)
@@ -170,7 +173,11 @@ def filter_items(items, select, name='items', indent=0):
 
 def download_notebooks(graph_client, path, select=None, indent=0):
     notebooks = get_json(graph_client, f'{graph_url}/me/onenote/notebooks')
-    indent_print(0, f'Got {len(notebooks)} notebooks.')
+    indent_print(0, f'Got {len(notebooks)} notebooks:')
+    print(f'---------------------------------------------')
+    for n in notebooks:
+        print(n.get("displayName"))
+    print(f'---------------------------------------------')
     notebooks, select = filter_items(notebooks, select, 'notebooks', indent)
     for nb in notebooks:
         nb_name = nb["displayName"]
@@ -196,7 +203,7 @@ def download_sections(graph_client, sections, path, select=None, indent=0):
     sections, select = filter_items(sections, select, 'sections', indent)
     for sec in sections:
         sec_name = sec["displayName"]
-        indent_print(indent, f'Opening section {sec_name}')
+        indent_print(indent, f'Opening subsection: {path}/{sec_name}.NOTES')
         pages = get_json(graph_client, sec['pagesUrl'] + '?pagelevel=true')
         indent_print(indent + 1, f'Got {len(pages)} pages.')
         download_pages(graph_client, pages, path / (sec_name + '.NOTES'), select, indent=indent + 1)
@@ -213,7 +220,7 @@ def download_pages(graph_client, pages, path, select=None, indent=0):
         level = page['level']
         page_title = sanitize_filename(f'{page["title"]}')
         page_title = sanitize_filepath(f'{page_title}')
-        indent_print(indent, f'Opening page {page_title}')
+        indent_print(indent, f'Opening page: {page_title}' + '.html')
         if level == 0:
             page_dir = level_dirs[0]
             level_dirs[1] = page_title + '.NOTES'
@@ -222,7 +229,6 @@ def download_pages(graph_client, pages, path, select=None, indent=0):
             level_dirs[2] = page_title + '.NOTES'
         if level == 2:
             page_dir = level_dirs[0] / level_dirs[1] / level_dirs[2]
-        indent_print(indent, f'page_dirs {page_dir}')
         download_page(graph_client, page['contentUrl'], page_dir, page_title, indent=indent + 1)
 
 def download_page(graph_client, page_url, path, page_title, indent=0):
@@ -234,7 +240,7 @@ def download_page(graph_client, page_url, path, page_title, indent=0):
     response = get(graph_client, page_url, indent=indent)
     if response is not None:
         content = response.text
-        indent_print(indent, f'Got content of length {len(content)}')
+        indent_print(indent, f'length:{len(content)}')
         content = re.sub(r'(?: {2})', '&nbsp;&nbsp;', content)
         content = re.sub(r'<div .*?>', '<div style="margin:20px;max-width:624px">', content)
         content = re.sub(r'<body .*?>', '<body style="font-family:Calibri;font-size:14pt;background:#1a1a1a;color:#ddd">', content)
@@ -276,11 +282,21 @@ def download_page(graph_client, page_url, path, page_title, indent=0):
         if dateRegex.search(content):
             ddate = dateRegex.search(content)
             date_object = datetime.strptime(ddate.group(0), '%Y-%m-%d').date()
-            content = re.sub(r'(<div style="margin:20px;max-width:624px.*?>)', r'\1\n\t\t<time style="color:#595959;text-align:right;display:block;font-style:italic;margin-bottom:40px">%s</time>\n'%date_object, content)
+        else:
+            date_object = '0000-00-00'
+        content = re.sub(r'(<div style="margin:20px;max-width:624px.*?>)', r'\1\n\t\t<time style="color:#595959;text-align:right;display:block;font-style:italic;margin-bottom:40px">%s</time>\n'%date_object, content, 1)
         titleRegex = re.compile(r'<title>(.*?)</title>')
         ttitle = titleRegex.search(content)
-        title_object = ttitle.group(1)
-        content = re.sub(r'(<div style="margin:20px;max-width:624px.*?>)', r'\1\n\t\t<h1 style="margin-bottom: 0pt;font-weight: normal;border-bottom: 1px solid #777;">%s</h1>\n'%title_object, content)
+        if ttitle:
+            #title_object = ttitle.group(1)
+            title_object = page_title
+            content  = re.sub(r'<title>.*?</title>', r'<title>%s</title>'%title_object, content, 1)
+        else:
+            title_object = page_title
+            title_new = '<title>' + title_object + '</title>'
+            head_default = '\n\t\t' + title_new + '\n\t\t<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />\n\t\t<meta name="created" content="0000-00-00T00:00:00.0000000" />\n\t\t<style>\n\t\t\thtml{width:100%}\n\t\t\tbody>div p {margin-top:0pt;margin-bottom:0pt}\n\t\t\timg{display:block}\n\t\t</style>\n\t'
+            content = re.sub(r'<html lang="en-US">', r'<html lang="en-US">\n\t<head>%s</head>'%head_default, content)
+        content = re.sub(r'(<div style="margin:20px;max-width:624px.*?>)', r'\1\n\t\t<h1 style="margin-bottom: 0pt;font-weight: normal;border-bottom: 1px solid #777;">%s</h1>\n'%title_object, content, 1)
         content = download_attachments(graph_client, content, path, page_title, indent=indent)
         with open(out_html, "w", encoding='utf-8') as f:
             f.write(content)
